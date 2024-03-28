@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -22,8 +23,16 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+
+	"github.com/go-acme/lego/v4/certcrypto"
+	"github.com/go-acme/lego/v4/certificate"
+	"github.com/go-acme/lego/v4/challenge/http01"
+	"github.com/go-acme/lego/v4/lego"
+	"github.com/go-acme/lego/v4/registration"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/acme/autocert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -492,6 +501,22 @@ func (oAdmin *OvpnAdmin) downloadCcdHandler(w http.ResponseWriter, r *http.Reque
 
 var app OpenVPNPKI
 
+type MyUser struct {
+	Email        string
+	Registration *registration.Resource
+	key          crypto.PrivateKey
+}
+
+func (u *MyUser) GetEmail() string {
+	return u.Email
+}
+func (u MyUser) GetRegistration() *registration.Resource {
+	return u.Registration
+}
+func (u *MyUser) GetPrivateKey() crypto.PrivateKey {
+	return u.key
+}
+
 func main() {
 	kingpin.Version(version)
 	kingpin.Parse()
@@ -501,6 +526,65 @@ func main() {
 
 	log.Printf("key dir: %s", *letsencryptkeys)
 	log.Printf("le domain %s", *letsencryptdomain)
+
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	myUser := MyUser{
+		Email: "gam4er@gmail.com",
+		key:   privateKey,
+	}
+
+	config := lego.NewConfig(&myUser)
+    // Здесь указывайте ваш email
+    
+    config.CADirURL = lego.LEDirectoryProduction
+    config.Certificate.KeyType = certcrypto.RSA2048
+
+    // Создание клиента
+    legoClient, err := lego.NewClient(config)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Регистрация пользователя
+    reg, err := legoClient.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+    if err != nil {
+        log.Fatal(err)
+    }
+
+	myUser.Registration = reg
+    // Настройка HTTP-челленджа
+    err = legoClient.Challenge.SetHTTP01Provider(http01.NewProviderServer("", "80"))
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Получение сертификата
+    request := certificate.ObtainRequest{
+        Domains: []string{*letsencryptdomain},
+        Bundle:  true,
+    }
+    certificates, err := legoClient.Certificate.Obtain(request)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Настройка HTTPS сервера
+    cert, err := tls.X509KeyPair(certificates.Certificate, certificates.PrivateKey)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    server := &http.Server{
+        Addr: ":443",
+        TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+        ReadTimeout:  5 * time.Second,
+        WriteTimeout: 5 * time.Second,
+    }
 
 	if *storageBackend == "kubernetes.secrets" {
 		err := app.run()
@@ -594,9 +678,15 @@ func main() {
 	log.Printf("Bind: http://%s:%s%s", *listenHost, *listenPort, *listenBaseUrl)
 	//log.Fatal(http.ListenAndServe(*listenHost+":"+*listenPort, nil))
 
+	log.Printf("Starting HTTPS server on %s", server.Addr)
+    err = server.ListenAndServeTLS("", "")
+    if err != nil {
+        log.Fatal(err)
+    }
+	/*
 	if *letsencrypt {
 		log.Printf("key dir: %s", *letsencryptkeys)
-		log.Printf("le domain", *letsencryptdomain)
+		log.Printf("le domain: %s", *letsencryptdomain)
 
 		manager := autocert.Manager{
 			Prompt:     autocert.AcceptTOS,
@@ -611,7 +701,7 @@ func main() {
 
 		log.Fatal(server.ListenAndServeTLS("", "")) // Пути к сертификатам не требуются, так как они управляются `autocert.Manager`
 		log.Printf("server started")
-	}
+	}*/
 }
 
 func CacheControlWrapper(h http.Handler) http.Handler {
