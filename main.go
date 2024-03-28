@@ -600,12 +600,12 @@ func main() {
 
 		manager := autocert.Manager{
 			Prompt:     autocert.AcceptTOS,
-			Cache:      autocert.DirCache(*letsencryptkeys),        // Укажите директорию для хранения сертификатов
-			HostPolicy: autocert.HostWhitelist(*letsencryptdomain), // Замените yourdomain.com на ваш домен
+			Cache:      autocert.DirCache("/root/ovpn-admin"),        // Укажите директорию для хранения сертификатов
+			HostPolicy: autocert.HostWhitelist("ov.gam.click"), // Замените yourdomain.com на ваш домен
 		}
 
 		server := &http.Server{
-			Addr:      "0.0.0.0:4443",
+			Addr:      ":https",
 			TLSConfig: &tls.Config{GetCertificate: manager.GetCertificate},
 		}
 
