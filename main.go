@@ -77,9 +77,9 @@ var (
 	logLevel                 = kingpin.Flag("log.level", "set log level: trace, debug, info, warn, error (default info)").Default("info").Envar("LOG_LEVEL").String()
 	logFormat                = kingpin.Flag("log.format", "set log format: text, json (default text)").Default("text").Envar("LOG_FORMAT").String()
 	storageBackend           = kingpin.Flag("storage.backend", "storage backend: filesystem, kubernetes.secrets (default filesystem)").Default("filesystem").Envar("STORAGE_BACKEND").String()
-	letsencrypt              = kingpin.Flag("letsencrypt", "enable Let's encrypt").Default("false").Envar("LETSENCRYPT").Bool()
-	letsencryptdomain        = kingpin.Flag("letsencryptdomain", "Your host domain name for generation Let's encrypt keys").Default("ovpn.example.com").Envar("LETSENCRYPTDOMAIN").String()
-	letsencryptkeys          = kingpin.Flag("letsencryptkeys", "Path for Let's Encrypt keys").Default("./lekeys").Envar("LETSENCRYPTKEYS").String()
+	letsencrypt              = kingpin.Flag("letsencrypt.enable", "enable Let's encrypt").Default("false").Envar("LETSENCRYPT").Bool()
+	letsencryptdomain        = kingpin.Flag("letsencrypt.domain", "Your host domain name for generation Let's encrypt keys").Default("ovpn.example.com").Envar("LETSENCRYPTDOMAIN").String()
+	letsencryptkeys          = kingpin.Flag("letsencrypt.keys", "Path for Let's Encrypt keys").Default("./lekeys").Envar("LETSENCRYPTKEYS").String()
 
 	certsArchivePath = "/tmp/" + certsArchiveFileName
 	ccdArchivePath   = "/tmp/" + ccdArchiveFileName
