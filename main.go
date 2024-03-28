@@ -605,7 +605,7 @@ func main() {
 		}
 
 		server := &http.Server{
-			Addr:      ":https",
+			Addr:      "0.0.0.0:8443",
 			TLSConfig: &tls.Config{GetCertificate: manager.GetCertificate},
 		}
 
