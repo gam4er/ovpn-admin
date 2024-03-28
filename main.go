@@ -499,6 +499,9 @@ func main() {
 	log.SetLevel(logLevels[*logLevel])
 	log.SetFormatter(logFormats[*logFormat])
 
+	log.Printf("key dir: %s", *letsencryptkeys)
+	log.Printf("le domain %s", *letsencryptdomain)
+
 	if *storageBackend == "kubernetes.secrets" {
 		err := app.run()
 		if err != nil {
