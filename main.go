@@ -4,16 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"io/ioutil"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"net"
 	"net/http"
 	"os"
@@ -24,6 +21,12 @@ import (
 	"text/template"
 	"time"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
+	"golang.org/x/crypto/acme/autocert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/gobuffalo/packr/v2"
 	"github.com/prometheus/client_golang/prometheus"
@@ -74,6 +77,9 @@ var (
 	logLevel                 = kingpin.Flag("log.level", "set log level: trace, debug, info, warn, error (default info)").Default("info").Envar("LOG_LEVEL").String()
 	logFormat                = kingpin.Flag("log.format", "set log format: text, json (default text)").Default("text").Envar("LOG_FORMAT").String()
 	storageBackend           = kingpin.Flag("storage.backend", "storage backend: filesystem, kubernetes.secrets (default filesystem)").Default("filesystem").Envar("STORAGE_BACKEND").String()
+	letsencrypt              = kingpin.Flag("letsencrypt", "enable Let's encrypt").Default("false").Envar("LETSENCRYPT").Bool()
+	letsencryptdomain        = kingpin.Flag("letsencryptdomain", "Your host domain name for generation Let's encrypt keys").Default("ovpn.example.com").Envar("LETSENCRYPTDOMAIN").String()
+	letsencryptkeys          = kingpin.Flag("letsencryptkeys", "Path for Let's Encrypt keys").Default("./lekeys").Envar("LETSENCRYPTKEYS").String()
 
 	certsArchivePath = "/tmp/" + certsArchiveFileName
 	ccdArchivePath   = "/tmp/" + ccdArchiveFileName
@@ -558,32 +564,46 @@ func main() {
 	static := CacheControlWrapper(http.FileServer(staticBox))
 
 	http.Handle(*listenBaseUrl, http.StripPrefix(strings.TrimRight(*listenBaseUrl, "/"), static))
-	http.HandleFunc(*listenBaseUrl + "api/server/settings", ovpnAdmin.serverSettingsHandler)
-	http.HandleFunc(*listenBaseUrl + "api/users/list", ovpnAdmin.userListHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/create", ovpnAdmin.userCreateHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/change-password", ovpnAdmin.userChangePasswordHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/rotate", ovpnAdmin.userRotateHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/delete", ovpnAdmin.userDeleteHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/revoke", ovpnAdmin.userRevokeHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/unrevoke", ovpnAdmin.userUnrevokeHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/config/show", ovpnAdmin.userShowConfigHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/disconnect", ovpnAdmin.userDisconnectHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/statistic", ovpnAdmin.userStatisticHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/ccd", ovpnAdmin.userShowCcdHandler)
-	http.HandleFunc(*listenBaseUrl + "api/user/ccd/apply", ovpnAdmin.userApplyCcdHandler)
+	http.HandleFunc(*listenBaseUrl+"api/server/settings", ovpnAdmin.serverSettingsHandler)
+	http.HandleFunc(*listenBaseUrl+"api/users/list", ovpnAdmin.userListHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/create", ovpnAdmin.userCreateHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/change-password", ovpnAdmin.userChangePasswordHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/rotate", ovpnAdmin.userRotateHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/delete", ovpnAdmin.userDeleteHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/revoke", ovpnAdmin.userRevokeHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/unrevoke", ovpnAdmin.userUnrevokeHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/config/show", ovpnAdmin.userShowConfigHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/disconnect", ovpnAdmin.userDisconnectHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/statistic", ovpnAdmin.userStatisticHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/ccd", ovpnAdmin.userShowCcdHandler)
+	http.HandleFunc(*listenBaseUrl+"api/user/ccd/apply", ovpnAdmin.userApplyCcdHandler)
 
-	http.HandleFunc(*listenBaseUrl + "api/sync/last/try", ovpnAdmin.lastSyncTimeHandler)
-	http.HandleFunc(*listenBaseUrl + "api/sync/last/successful", ovpnAdmin.lastSuccessfulSyncTimeHandler)
-	http.HandleFunc(*listenBaseUrl + downloadCertsApiUrl, ovpnAdmin.downloadCertsHandler)
-	http.HandleFunc(*listenBaseUrl + downloadCcdApiUrl, ovpnAdmin.downloadCcdHandler)
+	http.HandleFunc(*listenBaseUrl+"api/sync/last/try", ovpnAdmin.lastSyncTimeHandler)
+	http.HandleFunc(*listenBaseUrl+"api/sync/last/successful", ovpnAdmin.lastSuccessfulSyncTimeHandler)
+	http.HandleFunc(*listenBaseUrl+downloadCertsApiUrl, ovpnAdmin.downloadCertsHandler)
+	http.HandleFunc(*listenBaseUrl+downloadCcdApiUrl, ovpnAdmin.downloadCcdHandler)
 
 	http.Handle(*metricsPath, promhttp.HandlerFor(ovpnAdmin.promRegistry, promhttp.HandlerOpts{}))
-	http.HandleFunc(*listenBaseUrl + "ping", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(*listenBaseUrl+"ping", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "pong")
 	})
 
 	log.Printf("Bind: http://%s:%s%s", *listenHost, *listenPort, *listenBaseUrl)
 	log.Fatal(http.ListenAndServe(*listenHost+":"+*listenPort, nil))
+
+	if *letsencrypt {
+		manager := autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			Cache:      autocert.DirCache(*letsencryptkeys),        // Укажите директорию для хранения сертификатов
+			HostPolicy: autocert.HostWhitelist(*letsencryptdomain), // Замените yourdomain.com на ваш домен
+		}
+
+		server := &http.Server{
+			Addr:      ":https",
+			TLSConfig: &tls.Config{GetCertificate: manager.GetCertificate},
+		}
+		log.Fatal(server.ListenAndServeTLS("", "")) // Пути к сертификатам не требуются, так как они управляются `autocert.Manager`
+	}
 }
 
 func CacheControlWrapper(h http.Handler) http.Handler {
