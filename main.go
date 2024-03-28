@@ -589,9 +589,12 @@ func main() {
 	})
 
 	log.Printf("Bind: http://%s:%s%s", *listenHost, *listenPort, *listenBaseUrl)
-	log.Fatal(http.ListenAndServe(*listenHost+":"+*listenPort, nil))
+	//log.Fatal(http.ListenAndServe(*listenHost+":"+*listenPort, nil))
 
 	if *letsencrypt {
+		log.Printf("key dir: %s", *letsencryptkeys)
+		log.Printf("le domain", *letsencryptdomain)
+
 		manager := autocert.Manager{
 			Prompt:     autocert.AcceptTOS,
 			Cache:      autocert.DirCache(*letsencryptkeys),        // Укажите директорию для хранения сертификатов
@@ -602,7 +605,9 @@ func main() {
 			Addr:      ":https",
 			TLSConfig: &tls.Config{GetCertificate: manager.GetCertificate},
 		}
+
 		log.Fatal(server.ListenAndServeTLS("", "")) // Пути к сертификатам не требуются, так как они управляются `autocert.Manager`
+		log.Printf("server started")
 	}
 }
 
